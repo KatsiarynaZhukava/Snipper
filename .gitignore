@@ -1,0 +1,10 @@
+**/Debug
+**/x64
+.idea/
+.vs/
+*.aps
+*.filters
+*.user
+*.vs
+*.vcxproj
+*.ico
