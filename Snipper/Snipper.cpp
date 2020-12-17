@@ -7,6 +7,7 @@
 #include "windowsx.h""
 #include "commdlg.h"
 #include "GlobalValues.h"
+#include "dwmapi.h"
 
 
 HINSTANCE   hInstance;                 
@@ -27,7 +28,8 @@ enum screenMode
 	ENTIRE_SCREEN, 
 	WINDOW, 
 	RECTANGLE, 
-	ARBITRARY_AREA 
+	ARBITRARY_AREA,
+	NONE
 };
 
 
@@ -92,98 +94,93 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
 
 LRESULT CALLBACK MainWndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
-
-	int currentPos, wheelDelta, step = 0;
 	static int timeout;
 
     switch (message)
     {
-	case WM_CREATE:
-		initializeSaveFileDialog(hWnd, saveFileDialog);
-		break;
-    case WM_COMMAND:
-        {
-            int wmId = LOWORD(wParam);
-            switch (wmId)
-            {
-			case IDM_ENTIRE_SCREEN:
-				if (timeout)
+		case WM_CREATE:
+			initializeSaveFileDialog(hWnd, saveFileDialog);
+			break;
+		case WM_COMMAND:
+			{
+				int wmId = LOWORD(wParam);
+				switch (wmId)
 				{
-					Sleep(timeout);
-					timeout = 0;
+				case IDM_ENTIRE_SCREEN:
+					if (timeout)
+					{
+						Sleep(timeout);
+						timeout = 0;
+					}
+
+					SystemParametersInfo(SPI_GETWORKAREA, 0, &rect, 0);
+					ShowWindow(hMainWnd, SW_HIDE);
+					hBitmap = TakeScreenShot(hMainWnd, rect);
+					break;
+				case ID_SCREENAREA_WINDOW:
+					if (timeout)
+					{
+						Sleep(timeout);
+						timeout = 0;
+					}
+					screenMode = WINDOW;
+
+					ShowWindow(hMainWnd, SW_HIDE);
+					ShowWindow(hBackWnd, SW_SHOW);
+					break;
+				case IDM_RECTANGLE:
+					if (timeout)
+					{
+						Sleep(timeout);
+						timeout = 0;
+					}
+					screenMode = RECTANGLE;
+
+					ShowWindow(hMainWnd, SW_HIDE);
+					ShowWindow(hBackWnd, SW_SHOW);
+					break;
+				case ID_SCREENAREA_ARBITRARYAREA:
+					break;
+				case ID_TIMER_1SECOND:
+					timeout = 1000;
+					break;
+				case ID_TIMER_2SECONDS:
+					timeout = 2000;
+					break;
+				case ID_TIMER_3SECONDS:
+					timeout = 3000;
+					break;
+				case ID_TIMER_4SECONDS:
+					timeout = 4000;
+					break;
+				case ID_TIMER_5SECONDS:
+					timeout = 5000;
+					break;
+				case ID_FILE_SAVEAS:
+					SaveFile(hMainWnd, hBitmap, saveFileDialog);
+					break;
+				default:
+					return DefWindowProc(hWnd, message, wParam, lParam);
 				}
-				ShowWindow(hMainWnd, SW_HIDE);
-				ShowWindow(hBackWnd, SW_SHOW);
+			}
+			break;
+		case WM_LBUTTONDOWN:
+		case WM_LBUTTONUP:
 
-				SystemParametersInfo(SPI_GETWORKAREA, 0, &rect, 0);                         
-				hBitmap = TakeScreenShot(hMainWnd, rect);
+			break;
+		case WM_PAINT:
+			{
+				PAINTSTRUCT ps;
+				HDC hdc = BeginPaint(hWnd, &ps);
+				EndPaint(hWnd, &ps);
+			}
+			break;
+		case WM_DESTROY:
+			PostQuitMessage(0);
+			break;
+		default:
 
-				//ShowWindow(hBackWnd, SW_HIDE);
-				//ShowWindow(hMainWnd, SW_SHOW);
-				break;
-			case ID_SCREENAREA_WINDOW:
-				if (timeout)
-				{
-					Sleep(timeout);
-					timeout = 0;
-				}
-				screenMode = WINDOW;
-
-				ShowWindow(hMainWnd, SW_HIDE);
-				ShowWindow(hBackWnd, SW_SHOW);
-				break;
-			case IDM_RECTANGLE:
-				if (timeout)
-				{
-					Sleep(timeout);
-					timeout = 0;
-				}
-				screenMode = RECTANGLE;
-
-				ShowWindow(hMainWnd, SW_HIDE);
-				ShowWindow(hBackWnd, SW_SHOW);
-				break;
-			case ID_SCREENAREA_ARBITRARYAREA:
-				break;
-			case ID_TIMER_1SECOND:
-				timeout = 1000;
-				break;
-			case ID_TIMER_2SECONDS:
-				timeout = 2000;
-				break;
-			case ID_TIMER_3SECONDS:
-				timeout = 3000;
-				break;
-			case ID_TIMER_4SECONDS:
-				timeout = 4000;
-                break;
-			case ID_TIMER_5SECONDS:
-				timeout = 5000;
-				break;
-			case ID_FILE_SAVEAS:
-				SaveFile(hMainWnd, hBitmap, saveFileDialog);
-				break;
-            default:
-                return DefWindowProc(hWnd, message, wParam, lParam);
-            }
-        }
-        break;
-	case WM_LBUTTONDOWN:
-	case WM_LBUTTONUP:
-
-		break;
-    case WM_PAINT:
-        {
-            PAINTSTRUCT ps;
-            HDC hdc = BeginPaint(hWnd, &ps);
-            EndPaint(hWnd, &ps);
-        }
-        break;
-    case WM_DESTROY:
-        PostQuitMessage(0);
-        break;
-    default:
-        return DefWindowProc(hWnd, message, wParam, lParam);
+			return DefWindowProc(hWnd, message, wParam, lParam);
     }
     return 0;
 }
@@ -193,41 +190,40 @@ LRESULT CALLBACK BackWndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lPar
 {
 	switch (message)
 	{
-	case WM_LBUTTONDOWN:
-		startX = GET_X_LPARAM(lParam);
-		startY = GET_Y_LPARAM(lParam);
-		break;
-	case WM_LBUTTONUP:
-		switch (screenMode)
+		case WM_LBUTTONDOWN:
+			startX = GET_X_LPARAM(lParam);
+			startY = GET_Y_LPARAM(lParam);
+			break;
+		case WM_LBUTTONUP:
+			switch (screenMode)
+			{
+			case WINDOW:
+				POINT mousePosition;
+				mousePosition.x = startX;
+				mousePosition.y = startY;
+
+				ShowWindow(hBackWnd, SW_HIDE);
+				hScreenWnd = WindowFromPoint(mousePosition);
+				DwmGetWindowAttribute(hScreenWnd, DWMWA_EXTENDED_FRAME_BOUNDS, &rect, sizeof(RECT));
+				hBitmap = TakeScreenShot(hMainWnd, rect);
+				break;
+			case RECTANGLE:
+				endX = GET_X_LPARAM(lParam);
+				endY = GET_Y_LPARAM(lParam);
+
+				ShowWindow(hBackWnd, SW_HIDE);
+				GetBitmapFrame();
+				hBitmap = TakeScreenShot(hMainWnd, rect);
+				break;
+			}
+			break;
+		case WM_DESTROY:
 		{
-		case WINDOW:
-			POINT mousePosition;
-			mousePosition.x = startX;
-			mousePosition.y = startY;
-
-			ShowWindow(hBackWnd, SW_HIDE);
-			hScreenWnd = WindowFromPoint(mousePosition);
-			GetWindowRect(hScreenWnd, &rect);
-			hBitmap = TakeScreenShot(hMainWnd, rect);
-			break;
-		case RECTANGLE:
-			endX = GET_X_LPARAM(lParam);
-			endY = GET_Y_LPARAM(lParam);
-
-			ShowWindow(hBackWnd, SW_HIDE);
-			GetBitmapFrame();
-			hBitmap = TakeScreenShot(hMainWnd, rect);
-			break;
+			PostQuitMessage(0);
 		}
-
-		break;
-	case WM_DESTROY:
-	{
-		PostQuitMessage(0);
-	}
-		break;
-	default:
-		return DefWindowProc(hWnd, message, wParam, lParam);
+			break;
+		default:
+			return DefWindowProc(hWnd, message, wParam, lParam);
 	}
 	return 0;
 }
@@ -269,9 +265,11 @@ void GetBitmapFrame()
 
 HBITMAP TakeScreenShot(HWND hWnd, RECT rect)
 {
+	Sleep(TIMEOUT_WINDOW_DISAPPEAR);
 	HBITMAP hBitmap = CaptureScreen(hWnd, rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top);
 	GetWindowRect(hWnd, &rect);
-	if (hBitmap != NULL)
+
+	if (hBitmap != NULL) 
 	{
 		ShowWindow(hMainWnd, SW_SHOW);
 		MoveWindow(hWnd, rect.left, rect.top, DEFAULT_WINDOW_EXTENDED_WIDTH, DEFAULT_WINDOW_EXTENDED_HEIGHT, true);
@@ -287,7 +285,6 @@ HBITMAP TakeScreenShot(HWND hWnd, RECT rect)
 HBITMAP CaptureScreen(HWND hWnd, int startX, int startY, int width, int height)
 {
 	HDC hdcScreen, hdcMemDC = NULL;
-	HWND hDesktopWindow;
 	HBITMAP hbmScreen = NULL;
 	BITMAP bmpScreen, bm;
 
