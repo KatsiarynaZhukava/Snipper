@@ -4,10 +4,14 @@
 #include "Snipper.h"
 #include "RegisterWindows.h"
 #include "InitWindows.h"
-#include "windowsx.h""
+#include "windowsx.h"
 #include "commdlg.h"
 #include "GlobalValues.h"
 #include "dwmapi.h"
+#include "shlwapi.h"
+#include <string>
+//#include <afxstr.h>
+#include <atlimage.h>
 
 
 HINSTANCE   hInstance;                 
@@ -41,15 +45,19 @@ RECT rect;
 OPENFILENAME saveFileDialog;
 int startX = 0, startY = 0, endX = 0, endY = 0;
 enum screenMode screenMode;
+CHOOSECOLOR chooseColor = { 0 };
 
 
 // My defined functions
 void initializeSaveFileDialog(HWND hWnd, OPENFILENAME &saveFileDialog);
+void initializeChooseColor(HWND hWnd);
 HBITMAP TakeScreenShot(HWND hWnd, RECT rect);
 HBITMAP CaptureScreen(HWND hWnd, int x, int y, int width, int height);
 void DrawScreen(HWND hWnd, HBITMAP hBitmap);
 void SaveFile(HWND hWnd, HBITMAP hBitmap, OPENFILENAME saveFileDialog);
 void GetBitmapFrame();
+BOOL SaveHBITMAPToFile(HBITMAP hBitmap, LPCTSTR lpszFileName);
+void DrawRect(HWND hWnd);
 
 
 
@@ -95,11 +103,19 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
 LRESULT CALLBACK MainWndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
 	static int timeout;
+	static RECT currentWindowRect;
 
     switch (message)
     {
 		case WM_CREATE:
+			initializeChooseColor(hWnd);
 			initializeSaveFileDialog(hWnd, saveFileDialog);
+			break;
+		case WM_MOVE:
+			if (hBitmap)
+			{
+				DrawScreen(hWnd, hBitmap);
+			}
 			break;
 		case WM_COMMAND:
 			{
@@ -159,6 +175,11 @@ LRESULT CALLBACK MainWndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lPar
 				case ID_FILE_SAVEAS:
 					SaveFile(hMainWnd, hBitmap, saveFileDialog);
 					break;
+				case ID_PEN_COLOR:				
+					if (ChooseColor(&chooseColor)) {
+						// Действия с cc.rgbResult
+					}
+					break;
 				default:
 					return DefWindowProc(hWnd, message, wParam, lParam);
 				}
@@ -204,7 +225,7 @@ LRESULT CALLBACK BackWndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lPar
 
 				ShowWindow(hBackWnd, SW_HIDE);
 				hScreenWnd = WindowFromPoint(mousePosition);
-				DwmGetWindowAttribute(hScreenWnd, DWMWA_EXTENDED_FRAME_BOUNDS, &rect, sizeof(RECT));
+				DwmGetWindowAttribute(hScreenWnd, DWMWA_EXTENDED_FRAME_BOUNDS, &rect, sizeof(RECT));				
 				hBitmap = TakeScreenShot(hMainWnd, rect);
 				break;
 			case RECTANGLE:
@@ -217,6 +238,11 @@ LRESULT CALLBACK BackWndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lPar
 				break;
 			}
 			break;
+		case WM_MOUSEMOVE:
+			endX = GET_X_LPARAM(lParam);
+			endY = GET_Y_LPARAM(lParam);
+			DrawRect(hWnd);
+			break;
 		case WM_DESTROY:
 		{
 			PostQuitMessage(0);
@@ -227,7 +253,6 @@ LRESULT CALLBACK BackWndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lPar
 	}
 	return 0;
 }
-
 
 
 
@@ -286,7 +311,7 @@ HBITMAP CaptureScreen(HWND hWnd, int startX, int startY, int width, int height)
 {
 	HDC hdcScreen, hdcMemDC = NULL;
 	HBITMAP hbmScreen = NULL;
-	BITMAP bmpScreen, bm;
+	BITMAP bmpScreen;
 
 	hdcScreen = GetDC(NULL);
 	hdcMemDC = CreateCompatibleDC(hdcScreen);
@@ -313,7 +338,6 @@ HBITMAP CaptureScreen(HWND hWnd, int startX, int startY, int width, int height)
 	}
 
 	GetObject(hbmScreen, sizeof(BITMAP), &bmpScreen);
-	//SetLayeredWindowAttributes(hWnd, NULL, 255, LWA_ALPHA);	
 
 cleanUp:
 	DeleteObject(hdcMemDC);
@@ -326,14 +350,27 @@ void DrawScreen(HWND hWnd, HBITMAP hBitmap)
 {
 	HDC hdc, hdcMem;
 	BITMAP bm;
+	RECT windowRect;
+	int startScreenPointX = 0, startScreenPointY = 0;
 
 	hdc = GetDC(hWnd);
+	GetClientRect(hWnd, &windowRect);
 
 	hdcMem = CreateCompatibleDC(hdc);
 	GetObject(hBitmap, sizeof(bm), &bm);
 	SelectObject(hdcMem, hBitmap);
 
-	BitBlt(hdc, 0, 0, bm.bmWidth, bm.bmHeight, hdcMem, 0, 0, SRCCOPY);
+	if (windowRect.right - windowRect.left >= bm.bmWidth)
+	{
+		startScreenPointX = (((windowRect.right - windowRect.left) - bm.bmWidth) / 2);
+	}
+	if (windowRect.bottom - windowRect.top >= bm.bmHeight)
+	{
+		startScreenPointY = (((windowRect.bottom - windowRect.top) - bm.bmHeight) / 2);
+	}
+
+
+	BitBlt(hdc, startScreenPointX, startScreenPointY, bm.bmWidth, bm.bmHeight, hdcMem, 0, 0, SRCCOPY);
 
 	ReleaseDC(hWnd, hdc);
 
@@ -341,13 +378,12 @@ void DrawScreen(HWND hWnd, HBITMAP hBitmap)
 	//DeleteObject(hBitmap);
 }
 
-
-
-
-
-
-
-
+void DrawRect(HWND hWnd)
+{
+	HDC hdc = GetDC(hWnd);
+	Rectangle(hdc, startX, startY, endX, endY);
+	ReleaseDC(hWnd, hdc);
+}
 
 
 
@@ -363,6 +399,28 @@ void DrawScreen(HWND hWnd, HBITMAP hBitmap)
 /////////////////////////////////////////////////////////////
 
 
+
+void initializeChooseColor(HWND hWnd)
+{
+	COLORREF    custColors[16];
+	ZeroMemory(&chooseColor, sizeof(CHOOSECOLOR));
+
+	chooseColor.lStructSize = sizeof(CHOOSECOLOR);
+
+	chooseColor.hwndOwner = hWnd;
+	chooseColor.rgbResult = RGB(255, 0, 0);
+	chooseColor.lpCustColors = NULL;
+	chooseColor.Flags = CC_FULLOPEN | CC_RGBINIT;
+	chooseColor.lpCustColors = custColors;
+}
+
+
+
+
+
+///////////////////////////////////////////////////////////// Save file ///////////////////////////////////////////////////////////
+
+
 void initializeSaveFileDialog(HWND hWnd, OPENFILENAME &saveFileDialog)
 {
 	char szSaveFileName[MAX_PATH];
@@ -370,43 +428,129 @@ void initializeSaveFileDialog(HWND hWnd, OPENFILENAME &saveFileDialog)
 	ZeroMemory(&saveFileDialog, sizeof(saveFileDialog));
 	saveFileDialog.lStructSize = sizeof(saveFileDialog);
 	saveFileDialog.hwndOwner = hWnd;
-	saveFileDialog.lpstrFilter = (LPCWSTR)L"Jpg-file (*.JPG)\0*.jpg\0Gif-file (*.GIF)\0*.gif\0Png-file (*.PNG)\0*.png\0";
+	saveFileDialog.lpstrFilter = (LPCWSTR)L"Jpg-file (*.JPG)\0*.jpg\0Gif-file (*.GIF)\0*.gif\0Png-file (*.PNG)\0*.png\0Bmp-file (*.BMP)\0*.bmp\0";
 	saveFileDialog.lpstrFile = (LPWSTR)szSaveFileName;
 	saveFileDialog.nMaxFile = MAX_PATH;
-	//saveFileDialog.lpstrFileTitle = (LPWSTR)L"Screen";
 	saveFileDialog.Flags = OFN_EXPLORER | OFN_PATHMUSTEXIST | OFN_HIDEREADONLY | OFN_OVERWRITEPROMPT;
-	//saveFileDialog.lpstrDefExt = "Dtxt";
+	saveFileDialog.lpstrDefExt = (LPCWSTR)L"jpg";
 }
 
 void SaveFile(HWND hWnd, HBITMAP hBitmap, OPENFILENAME saveFileDialog)
 {
-	if (GetSaveFileName(&saveFileDialog)) {
+	CImage image;
 
+	if (GetSaveFileName(&saveFileDialog)) {
+		LPCWSTR extension = PathFindExtensionW(saveFileDialog.lpstrFile);
+		//const wchar_t* str = (wchar_t*)PathStripPath(saveFileDialog.lpstrFile);
+		PathStripPath(saveFileDialog.lpstrFile);
+		const wchar_t* str = (const wchar_t*)saveFileDialog.lpstrFile;
+		//const wchar_t* str = L"aaaaaaaaaaaaaaa.jpg";
+		if (lstrcmpW(extension, (LPCWSTR)L".jpg") == 0)
+		{
+			image.Attach(hBitmap);
+			//image.Save(str, Gdiplus::ImageFormatJPEG);
+			image.Save((LPCWSTR)L"someImage.jpg", Gdiplus::ImageFormatJPEG);
+		}
+		else if (lstrcmpW(extension, (LPCWSTR)L".gif") == 0)
+		{
+			image.Attach(hBitmap);
+			//image.Save((LPCTSTR)saveFileDialog.lpstrFile, Gdiplus::ImageFormatGIF);
+			image.Save((LPCTSTR)L"someImage.gif", Gdiplus::ImageFormatGIF);
+
+		}
+		else if (lstrcmpW(extension, (LPCWSTR)L".png") == 0)
+		{
+			image.Attach(hBitmap);
+			//image.Save((LPCTSTR)saveFileDialog.lpstrFile, Gdiplus::ImageFormatPNG);
+			image.Save((LPCTSTR)L"someImage.png", Gdiplus::ImageFormatPNG);
+		}
+		else if (lstrcmpW(extension, (LPCWSTR)L".bmp") == 0)
+		{
+			SaveHBITMAPToFile(hBitmap, saveFileDialog.lpstrFile);
+		}
 	}
-	else
-	{
-		MessageBox(hWnd, L"Saving failed", L"Failed", MB_OK);
-	}
+	//DeleteObject(image);
 }
 
 
-/*private void btnSave_Click(object sender, EventArgs e)
+
+BOOL SaveHBITMAPToFile(HBITMAP hBitmap, LPCTSTR lpszFileName)
 {
-    saveDialog.FileName = txtModelName.Text;
-    saveDialog.DefaultExt = "jpg";
-    saveDialog.Filter = "JPG images (*.jpg)|*.jpg";    
+	HDC hDC;
+	int iBits;
+	WORD wBitCount;
+	DWORD dwPaletteSize = 0, dwBmBitsSize = 0, dwDIBSize = 0, dwWritten = 0;
+	BITMAP Bitmap0;
+	BITMAPFILEHEADER bmfHdr;
+	BITMAPINFOHEADER bi;
+	LPBITMAPINFOHEADER lpbi;
+	HANDLE fh, hDib, hPal, hOldPal2 = NULL;
+	hDC = CreateDC(TEXT("DISPLAY"), NULL, NULL, NULL);
+	iBits = GetDeviceCaps(hDC, BITSPIXEL) * GetDeviceCaps(hDC, PLANES);
+	DeleteDC(hDC);
+	if (iBits <= 1)
+		wBitCount = 1;
+	else if (iBits <= 4)
+		wBitCount = 4;
+	else if (iBits <= 8)
+		wBitCount = 8;
+	else
+		wBitCount = 24;
+	GetObject(hBitmap, sizeof(Bitmap0), (LPSTR)&Bitmap0);
+	bi.biSize = sizeof(BITMAPINFOHEADER);
+	bi.biWidth = Bitmap0.bmWidth;
+	bi.biHeight = -Bitmap0.bmHeight;
+	bi.biPlanes = 1;
+	bi.biBitCount = wBitCount;
+	bi.biCompression = BI_RGB;
+	bi.biSizeImage = 0;
+	bi.biXPelsPerMeter = 0;
+	bi.biYPelsPerMeter = 0;
+	bi.biClrImportant = 0;
+	bi.biClrUsed = 256;
+	dwBmBitsSize = ((Bitmap0.bmWidth * wBitCount + 31) & ~31) / 8
+		* Bitmap0.bmHeight;
+	hDib = GlobalAlloc(GHND, dwBmBitsSize + dwPaletteSize + sizeof(BITMAPINFOHEADER));
+	lpbi = (LPBITMAPINFOHEADER)GlobalLock(hDib);
+	*lpbi = bi;
 
-    if (saveDialog.ShowDialog() == DialogResult.OK)
-    {
-        Bitmap bmp = new Bitmap(pnlDraw.Width, pnlDraw.Height);
+	hPal = GetStockObject(DEFAULT_PALETTE);
+	if (hPal)
+	{
+		hDC = GetDC(NULL);
+		hOldPal2 = SelectPalette(hDC, (HPALETTE)hPal, FALSE);
+		RealizePalette(hDC);
+	}
 
-        pnlDraw.DrawToBitmap(bmp, new Rectangle(0, 0,
-            pnlDraw.Width, pnlDraw.Height));
 
-        var fileName = saveDialog.FileName;
-        if(!System.IO.Path.HasExtension(fileName) || System.IO.Path.GetExtension(fileName) != "jpg")
-            fileName = fileName + ".jpg";
+	GetDIBits(hDC, hBitmap, 0, (UINT)Bitmap0.bmHeight, (LPSTR)lpbi + sizeof(BITMAPINFOHEADER)
+		+ dwPaletteSize, (BITMAPINFO *)lpbi, DIB_RGB_COLORS);
 
-        bmp.Save(fileName, System.Drawing.Imaging.ImageFormat.Jpeg);
-    }
-}*/
+	if (hOldPal2)
+	{
+		SelectPalette(hDC, (HPALETTE)hOldPal2, TRUE);
+		RealizePalette(hDC);
+		ReleaseDC(NULL, hDC);
+	}
+
+	fh = CreateFile(lpszFileName, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS,
+		FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN, NULL);
+
+	if (fh == INVALID_HANDLE_VALUE)
+		return FALSE;
+
+	bmfHdr.bfType = 0x4D42; // "BM"
+	dwDIBSize = sizeof(BITMAPFILEHEADER) + sizeof(BITMAPINFOHEADER) + dwPaletteSize + dwBmBitsSize;
+	bmfHdr.bfSize = dwDIBSize;
+	bmfHdr.bfReserved1 = 0;
+	bmfHdr.bfReserved2 = 0;
+	bmfHdr.bfOffBits = (DWORD)sizeof(BITMAPFILEHEADER) + (DWORD)sizeof(BITMAPINFOHEADER) + dwPaletteSize;
+
+	WriteFile(fh, (LPSTR)&bmfHdr, sizeof(BITMAPFILEHEADER), &dwWritten, NULL);
+
+	WriteFile(fh, (LPSTR)lpbi, dwDIBSize, &dwWritten, NULL);
+	GlobalUnlock(hDib);
+	GlobalFree(hDib);
+	CloseHandle(fh);
+	return TRUE;
+}
