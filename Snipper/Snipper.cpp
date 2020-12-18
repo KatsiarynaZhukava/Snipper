@@ -10,7 +10,7 @@
 #include "dwmapi.h"
 #include "shlwapi.h"
 #include <string>
-//#include <afxstr.h>
+#include <atlstr.h>
 #include <atlimage.h>
 
 
@@ -45,7 +45,8 @@ RECT rect;
 OPENFILENAME saveFileDialog;
 int startX = 0, startY = 0, endX = 0, endY = 0;
 enum screenMode screenMode;
-CHOOSECOLOR chooseColor = { 0 };
+CHOOSECOLOR chooseColor;
+HPEN pen = CreatePen(PS_SOLID, 3, RGB(255, 0, 0));
 
 
 // My defined functions
@@ -56,10 +57,11 @@ HBITMAP CaptureScreen(HWND hWnd, int x, int y, int width, int height);
 void DrawScreen(HWND hWnd, HBITMAP hBitmap);
 void SaveFile(HWND hWnd, HBITMAP hBitmap, OPENFILENAME saveFileDialog);
 void GetBitmapFrame();
-BOOL SaveHBITMAPToFile(HBITMAP hBitmap, LPCTSTR lpszFileName);
 void DrawRect(HWND hWnd);
 int CountResizeWidth(int left, int right);
 int CountResizeHeight(HWND hWnd, int top, int bottom);
+void ClearWindow(HWND hwnd);
+void DrawLine(HWND hWnd, int startX, int startY, int endX, int endY);
 
 
 
@@ -105,10 +107,15 @@ LRESULT CALLBACK MainWndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lPar
 {
 	static int timeout;
 	static RECT currentWindowRect;
-
+	static bool isLineDrawing;
+	static POINT previousPoint;
+	static HDC hdc;
+	static bool lButtonPressed;
     switch (message)
     {
 		case WM_CREATE:
+			isLineDrawing = false;
+			lButtonPressed = true;
 			initializeChooseColor(hWnd);
 			initializeSaveFileDialog(hWnd, saveFileDialog);
 			break;
@@ -118,8 +125,17 @@ LRESULT CALLBACK MainWndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lPar
 				DrawScreen(hWnd, hBitmap);
 			}
 			break;
+		case WM_HOTKEY:
+			switch (wParam)
+			{
+				case COPY_TO_CLIPBOARD_ID:
+
+					break;
+			}
+			break;
 		case WM_COMMAND:
 			{
+				isLineDrawing = false;
 				int wmId = LOWORD(wParam);
 				switch (wmId)
 				{
@@ -144,6 +160,7 @@ LRESULT CALLBACK MainWndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lPar
 
 					ShowWindow(hMainWnd, SW_HIDE);
 					ShowWindow(hBackWnd, SW_SHOW);
+					SetLayeredWindowAttributes(hBackWnd, RGB(0, 0, 0), BACKWND_TRANSPARENCY, LWA_ALPHA);
 					break;
 				case IDM_RECTANGLE:
 					if (timeout)
@@ -155,6 +172,7 @@ LRESULT CALLBACK MainWndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lPar
 
 					ShowWindow(hMainWnd, SW_HIDE);
 					ShowWindow(hBackWnd, SW_SHOW);
+					SetLayeredWindowAttributes(hBackWnd, RGB(0, 0, 0), BACKWND_TRANSPARENCY, LWA_ALPHA);
 					break;
 				case ID_SCREENAREA_ARBITRARYAREA:
 					break;
@@ -176,19 +194,54 @@ LRESULT CALLBACK MainWndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lPar
 				case ID_FILE_SAVEAS:
 					SaveFile(hMainWnd, hBitmap, saveFileDialog);
 					break;
-				case ID_PEN_COLOR:				
-					if (ChooseColor(&chooseColor)) {
-						// Действия с cc.rgbResult
-					}
+				case ID_ACTIONS_CLEARALL:
+					hBitmap = NULL;
+					ClearWindow(hWnd);
+					break;
+				case ID_ACTIONS_COPYSCREENTOCLIPBOARD:
+					break;
+				case ID_PEN_COLOR:		
+					isLineDrawing = true;
+					lButtonPressed = false;
+					/*if (ChooseColor(&chooseColor) == TRUE) {
+						DeleteObject(pen);
+						pen = CreatePen(PS_SOLID, 3, chooseColor.rgbResult);
+					}*/
 					break;
 				default:
 					return DefWindowProc(hWnd, message, wParam, lParam);
 				}
 			}
 			break;
+		case WM_LBUTTONDBLCLK:
+			isLineDrawing = false;
+			break;
 		case WM_LBUTTONDOWN:
+			if (isLineDrawing)
+			{
+				previousPoint.x = LOWORD(lParam);
+				previousPoint.y = HIWORD(lParam);
+				lButtonPressed = true;
+			}
+			break;
 		case WM_LBUTTONUP:
-
+			if (isLineDrawing)
+			{
+				hdc = GetDC(hWnd);
+				MoveToEx(hdc, previousPoint.x, previousPoint.y, NULL);
+				LineTo(hdc, LOWORD(lParam), HIWORD(lParam));
+				ReleaseDC(hWnd, hdc);
+				lButtonPressed = false;
+			}
+			break;
+		case WM_MOUSEMOVE:
+			if (isLineDrawing && lButtonPressed)
+			{
+				hdc = GetDC(hWnd);
+				MoveToEx(hdc, previousPoint.x, previousPoint.y, NULL);
+				LineTo(hdc, previousPoint.x = LOWORD(lParam),previousPoint.y = HIWORD(lParam));
+				ReleaseDC(hWnd, hdc);
+			}
 			break;
 		case WM_PAINT:
 			{
@@ -210,11 +263,13 @@ LRESULT CALLBACK MainWndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lPar
 
 LRESULT CALLBACK BackWndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
+	static bool startedDrawing;
 	switch (message)
 	{
 		case WM_LBUTTONDOWN:
 			startX = GET_X_LPARAM(lParam);
 			startY = GET_Y_LPARAM(lParam);
+			startedDrawing = true;
 			break;
 		case WM_LBUTTONUP:
 			switch (screenMode)
@@ -238,11 +293,15 @@ LRESULT CALLBACK BackWndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lPar
 				hBitmap = TakeScreenShot(hMainWnd, rect);
 				break;
 			}
+			startedDrawing = false;
 			break;
 		case WM_MOUSEMOVE:
-			/*endX = GET_X_LPARAM(lParam);
-			endY = GET_Y_LPARAM(lParam);
-			DrawRect(hWnd);*/
+			if ((screenMode == RECTANGLE) && startedDrawing)
+			{
+				endX = GET_X_LPARAM(lParam);
+				endY = GET_Y_LPARAM(lParam);
+				DrawRect(hWnd);
+			}
 			break;
 		case WM_DESTROY:
 		{
@@ -254,12 +313,6 @@ LRESULT CALLBACK BackWndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lPar
 	}
 	return 0;
 }
-
-
-
-
-
-
 
 
 
@@ -296,10 +349,12 @@ HBITMAP TakeScreenShot(HWND hWnd, RECT rect)
 	HBITMAP hBitmap = CaptureScreen(hWnd, rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top);
 	GetWindowRect(hWnd, &windowRect);
 
+	UpdateWindow(hWnd);
+
 	if (hBitmap != NULL) 
 	{
 		ShowWindow(hMainWnd, SW_SHOW);
-		MoveWindow(hWnd, 0, 0, CountResizeWidth(rect.left, rect.right), CountResizeHeight(hWnd, rect.top, rect.bottom), true);
+		MoveWindow(hWnd, windowRect.left, windowRect.top, CountResizeWidth(rect.left, rect.right), CountResizeHeight(hWnd, rect.top, rect.bottom), true);
 		DrawScreen(hWnd, hBitmap);
 	}
 	else
@@ -350,24 +405,34 @@ cleanUp:
 
 void DrawScreen(HWND hWnd, HBITMAP hBitmap)
 {
-	HDC hdc, hdcMem;
+	HDC hdcMain, hdcMemory, hdcWithBitmap;
+	HBITMAP hbmMem;
 	BITMAP bm;
 	RECT windowRect;
 
-	hdc = GetDC(hWnd);
+	hdcMain = GetDC(hWnd);
+
 	GetClientRect(hWnd, &windowRect);
 
-	hdcMem = CreateCompatibleDC(hdc);
+	hdcWithBitmap = CreateCompatibleDC(hdcMain);
 	GetObject(hBitmap, sizeof(bm), &bm);
-	SelectObject(hdcMem, hBitmap);
+	SelectObject(hdcWithBitmap, hBitmap);                // Создали hdc с битмапом
 
-	BitBlt(hdc, SCREENSHOT_DISPLAY_BORDER, SCREENSHOT_DISPLAY_BORDER, bm.bmWidth, bm.bmHeight, hdcMem, 0, 0, SRCCOPY);
+	hdcMemory = CreateCompatibleDC(hdcMain);			// Создали дополнительный hdc для двойной буферизации
+	hbmMem = CreateCompatibleBitmap(hdcMain, windowRect.right - windowRect.left, windowRect.bottom - windowRect.top);
+	SelectObject(hdcMemory, hbmMem);
 
-	ReleaseDC(hWnd, hdc);
+	BitBlt(hdcMemory, 0, 0, bm.bmWidth, bm.bmHeight, hdcWithBitmap, 0, 0, SRCCOPY);			// Сначала переводим в память
+	BitBlt(hdcMain, SCREENSHOT_DISPLAY_BORDER, SCREENSHOT_DISPLAY_BORDER, bm.bmWidth, bm.bmHeight, hdcMemory, 0, 0, SRCCOPY); // Оттуда на экран
 
-	DeleteDC(hdcMem);
+	ReleaseDC(hWnd, hdcMain);
+
+	DeleteDC(hdcMemory);
+	DeleteDC(hdcWithBitmap);
+	DeleteObject(hbmMem);
 	//DeleteObject(hBitmap);
 }
+
 
 int CountResizeWidth(int left, int right)
 {
@@ -395,11 +460,62 @@ int CountResizeHeight(HWND hWnd, int top, int bottom)
 	return MAX_SCREEN_HEIGHT;
 }
 
-////////////////////////////////////////////// BackGroundWindow effects /////////////////////////////////
+
+void ClearWindow(HWND hWnd)
+{
+	RECT windowRect;
+	GetWindowRect(hWnd, &windowRect);
+	MoveWindow(hWnd, windowRect.left, windowRect.top, DEFAULT_WINDOW_WIDTH, DEFAULT_WINDOW_HEIGHT, true);
+}
+
+
+void DrawLine(HWND hWnd, int startX, int startY, int endX, int endY)
+{
+	HDC hdcMain, hdcWithBitmap;
+	BITMAP bm;
+
+	hdcMain = GetDC(hWnd);
+
+	hdcWithBitmap = CreateCompatibleDC(hdcMain);
+	GetObject(hBitmap, sizeof(bm), &bm);
+	SelectObject(hdcWithBitmap, hBitmap);                // Создали hdc с битмапом
+
+	MoveToEx(hdcWithBitmap, startX, startY, NULL);
+	LineTo(hdcWithBitmap, endX, endX);
+
+	BitBlt(hdcMain, 0, 0, bm.bmWidth, bm.bmHeight, hdcWithBitmap, 0, 0, SRCCOPY);			// Сначала переводим в память
+
+	/*hdcMemory = CreateCompatibleDC(hdcMain);			// Создали дополнительный hdc для двойной буферизации
+	hbmMem = CreateCompatibleBitmap(hdcMain, windowRect.right - windowRect.left, windowRect.bottom - windowRect.top);
+	SelectObject(hdcMemory, hbmMem);
+
+	BitBlt(hdcMemory, 0, 0, bm.bmWidth, bm.bmHeight, hdcWithBitmap, 0, 0, SRCCOPY);			// Сначала переводим в память
+	BitBlt(hdcMain, SCREENSHOT_DISPLAY_BORDER, SCREENSHOT_DISPLAY_BORDER, bm.bmWidth, bm.bmHeight, hdcMemory, 0, 0, SRCCOPY); // Оттуда на экран*/
+
+	ReleaseDC(hWnd, hdcMain);
+
+	/*DeleteDC(hdcMemory);
+	DeleteDC(hdcWithBitmap);
+	DeleteObject(hbmMem);*/
+
+	ReleaseDC(hWnd, hdcMain);
+}
+
+
+////////////////////////////////////////////// BackGroundWindow effects ////////////////////////////
 
 void DrawRect(HWND hWnd)
 {
-	HDC hdc = GetDC(hWnd);
+	HDC hdc;
+	HBITMAP hbmMem, hbmOld;
+	RECT windowRect;
+	GetWindowRect(hWnd, &windowRect);
+
+	hdc = GetDC(hWnd);
+
+	InvalidateRect(hWnd, &windowRect, TRUE);
+	UpdateWindow(hWnd);
+
 	Rectangle(hdc, startX, startY, endX, endY);
 	ReleaseDC(hWnd, hdc);
 }
@@ -407,17 +523,7 @@ void DrawRect(HWND hWnd)
 
 
 
-
-
-
-
-
-
-
-
 /////////////////////////////////////////////////////////////
-
-
 
 void initializeChooseColor(HWND hWnd)
 {
@@ -430,12 +536,8 @@ void initializeChooseColor(HWND hWnd)
 	chooseColor.rgbResult = RGB(255, 0, 0);
 	chooseColor.lpCustColors = NULL;
 	chooseColor.Flags = CC_FULLOPEN | CC_RGBINIT;
-	chooseColor.lpCustColors = custColors;
+	chooseColor.lpCustColors = (LPDWORD)custColors;
 }
-
-
-
-
 
 ///////////////////////////////////////////////////////////// Save file ///////////////////////////////////////////////////////////
 
@@ -447,7 +549,7 @@ void initializeSaveFileDialog(HWND hWnd, OPENFILENAME &saveFileDialog)
 	ZeroMemory(&saveFileDialog, sizeof(saveFileDialog));
 	saveFileDialog.lStructSize = sizeof(saveFileDialog);
 	saveFileDialog.hwndOwner = hWnd;
-	saveFileDialog.lpstrFilter = (LPCWSTR)L"Jpg-file (*.JPG)\0*.jpg\0Gif-file (*.GIF)\0*.gif\0Png-file (*.PNG)\0*.png\0Bmp-file (*.BMP)\0*.bmp\0";
+	saveFileDialog.lpstrFilter = (LPCWSTR)L"Файл JPG (*.JPG)\0*.jpg\0Файл GIF (*.GIF)\0*.gif\0Файл PNG (*.PNG)\0*.png\0Файл BMP (*.BMP)\0*.bmp\0";
 	saveFileDialog.lpstrFile = (LPWSTR)szSaveFileName;
 	saveFileDialog.nMaxFile = MAX_PATH;
 	saveFileDialog.Flags = OFN_EXPLORER | OFN_PATHMUSTEXIST | OFN_HIDEREADONLY | OFN_OVERWRITEPROMPT;
@@ -459,117 +561,34 @@ void SaveFile(HWND hWnd, HBITMAP hBitmap, OPENFILENAME saveFileDialog)
 	CImage image;
 
 	if (GetSaveFileName(&saveFileDialog)) {
+
 		LPCWSTR extension = PathFindExtensionW(saveFileDialog.lpstrFile);
-		//const wchar_t* str = (wchar_t*)PathStripPath(saveFileDialog.lpstrFile);
 		PathStripPath(saveFileDialog.lpstrFile);
 		const wchar_t* str = (const wchar_t*)saveFileDialog.lpstrFile;
-		//const wchar_t* str = L"aaaaaaaaaaaaaaa.jpg";
 		if (lstrcmpW(extension, (LPCWSTR)L".jpg") == 0)
 		{
 			image.Attach(hBitmap);
-			//image.Save(str, Gdiplus::ImageFormatJPEG);
-			image.Save((LPCWSTR)L"someImage.jpg", Gdiplus::ImageFormatJPEG);
+			image.Save((LPCTSTR)L"someImg.jpg", Gdiplus::ImageFormatJPEG);
+			image.Detach();
 		}
 		else if (lstrcmpW(extension, (LPCWSTR)L".gif") == 0)
 		{
 			image.Attach(hBitmap);
-			//image.Save((LPCTSTR)saveFileDialog.lpstrFile, Gdiplus::ImageFormatGIF);
-			image.Save((LPCTSTR)L"someImage.gif", Gdiplus::ImageFormatGIF);
-
+			image.Save(saveFileDialog.lpstrFile, Gdiplus::ImageFormatGIF);
+			image.Detach();
 		}
 		else if (lstrcmpW(extension, (LPCWSTR)L".png") == 0)
 		{
 			image.Attach(hBitmap);
-			//image.Save((LPCTSTR)saveFileDialog.lpstrFile, Gdiplus::ImageFormatPNG);
-			image.Save((LPCTSTR)L"someImage.png", Gdiplus::ImageFormatPNG);
+			image.Save((LPCTSTR)str, Gdiplus::ImageFormatPNG);
+			image.Detach();
 		}
 		else if (lstrcmpW(extension, (LPCWSTR)L".bmp") == 0)
 		{
-			SaveHBITMAPToFile(hBitmap, saveFileDialog.lpstrFile);
+			image.Attach(hBitmap);
+			image.Save((LPCTSTR)str, Gdiplus::ImageFormatBMP);
+			image.Detach();
 		}
 	}
-	//DeleteObject(image);
-}
-
-
-
-BOOL SaveHBITMAPToFile(HBITMAP hBitmap, LPCTSTR lpszFileName)
-{
-	HDC hDC;
-	int iBits;
-	WORD wBitCount;
-	DWORD dwPaletteSize = 0, dwBmBitsSize = 0, dwDIBSize = 0, dwWritten = 0;
-	BITMAP Bitmap0;
-	BITMAPFILEHEADER bmfHdr;
-	BITMAPINFOHEADER bi;
-	LPBITMAPINFOHEADER lpbi;
-	HANDLE fh, hDib, hPal, hOldPal2 = NULL;
-	hDC = CreateDC(TEXT("DISPLAY"), NULL, NULL, NULL);
-	iBits = GetDeviceCaps(hDC, BITSPIXEL) * GetDeviceCaps(hDC, PLANES);
-	DeleteDC(hDC);
-	if (iBits <= 1)
-		wBitCount = 1;
-	else if (iBits <= 4)
-		wBitCount = 4;
-	else if (iBits <= 8)
-		wBitCount = 8;
-	else
-		wBitCount = 24;
-	GetObject(hBitmap, sizeof(Bitmap0), (LPSTR)&Bitmap0);
-	bi.biSize = sizeof(BITMAPINFOHEADER);
-	bi.biWidth = Bitmap0.bmWidth;
-	bi.biHeight = -Bitmap0.bmHeight;
-	bi.biPlanes = 1;
-	bi.biBitCount = wBitCount;
-	bi.biCompression = BI_RGB;
-	bi.biSizeImage = 0;
-	bi.biXPelsPerMeter = 0;
-	bi.biYPelsPerMeter = 0;
-	bi.biClrImportant = 0;
-	bi.biClrUsed = 256;
-	dwBmBitsSize = ((Bitmap0.bmWidth * wBitCount + 31) & ~31) / 8
-		* Bitmap0.bmHeight;
-	hDib = GlobalAlloc(GHND, dwBmBitsSize + dwPaletteSize + sizeof(BITMAPINFOHEADER));
-	lpbi = (LPBITMAPINFOHEADER)GlobalLock(hDib);
-	*lpbi = bi;
-
-	hPal = GetStockObject(DEFAULT_PALETTE);
-	if (hPal)
-	{
-		hDC = GetDC(NULL);
-		hOldPal2 = SelectPalette(hDC, (HPALETTE)hPal, FALSE);
-		RealizePalette(hDC);
-	}
-
-
-	GetDIBits(hDC, hBitmap, 0, (UINT)Bitmap0.bmHeight, (LPSTR)lpbi + sizeof(BITMAPINFOHEADER)
-		+ dwPaletteSize, (BITMAPINFO *)lpbi, DIB_RGB_COLORS);
-
-	if (hOldPal2)
-	{
-		SelectPalette(hDC, (HPALETTE)hOldPal2, TRUE);
-		RealizePalette(hDC);
-		ReleaseDC(NULL, hDC);
-	}
-
-	fh = CreateFile(lpszFileName, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS,
-		FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN, NULL);
-
-	if (fh == INVALID_HANDLE_VALUE)
-		return FALSE;
-
-	bmfHdr.bfType = 0x4D42; // "BM"
-	dwDIBSize = sizeof(BITMAPFILEHEADER) + sizeof(BITMAPINFOHEADER) + dwPaletteSize + dwBmBitsSize;
-	bmfHdr.bfSize = dwDIBSize;
-	bmfHdr.bfReserved1 = 0;
-	bmfHdr.bfReserved2 = 0;
-	bmfHdr.bfOffBits = (DWORD)sizeof(BITMAPFILEHEADER) + (DWORD)sizeof(BITMAPINFOHEADER) + dwPaletteSize;
-
-	WriteFile(fh, (LPSTR)&bmfHdr, sizeof(BITMAPFILEHEADER), &dwWritten, NULL);
-
-	WriteFile(fh, (LPSTR)lpbi, dwDIBSize, &dwWritten, NULL);
-	GlobalUnlock(hDib);
-	GlobalFree(hDib);
-	CloseHandle(fh);
-	return TRUE;
+	DeleteObject(image);
 }

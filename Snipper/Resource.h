@@ -3,6 +3,7 @@
 // Используется Snipper.rc
 //
 #define IDC_MYICON                      2
+#define COPY_TO_CLIPBOARD_ID            3
 #define IDD_SNIPPER_DIALOG              102
 #define IDS_APP_TITLE                   103
 #define IDD_ABOUTBOX                    103
@@ -36,6 +37,12 @@
 #define ID_TIMER_2SECONDS               32790
 #define ID_TIMER_3SECONDS               32791
 #define ID_TIMER_4SECONDS               32792
+#define ID_ACCELERATOR32793             32793
+#define ID_ACTIONS_CLEARALL             32795
+#define ID_ACTIONS_PEN                  32796
+#define ID_ACTIONS_COPYSCREENTOCLIPBOARD 32797
+#define ID_PEN_COLOR32798               32798
+#define ID_ACTIONS_TEXT                 32799
 #define IDC_STATIC                      -1
 
 // Next default values for new objects
@@ -44,7 +51,7 @@
 #ifndef APSTUDIO_READONLY_SYMBOLS
 #define _APS_NO_MFC                     1
 #define _APS_NEXT_RESOURCE_VALUE        133
-#define _APS_NEXT_COMMAND_VALUE         32793
+#define _APS_NEXT_COMMAND_VALUE         32800
 #define _APS_NEXT_CONTROL_VALUE         1000
 #define _APS_NEXT_SYMED_VALUE           110
 #endif
