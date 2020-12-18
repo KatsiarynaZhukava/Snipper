@@ -41,7 +41,7 @@ BOOL CreateMainWindow(HWND* hMainWnd, HINSTANCE hInstance)
 
 
 	*hMainWnd = CreateWindowEx(
-		WS_EX_TOPMOST,
+		WS_EX_TOPMOST ,
 		TEXT("MainWnd"),
 		TEXT("SNIPPER"),
 		WS_POPUPWINDOW | WS_CAPTION,

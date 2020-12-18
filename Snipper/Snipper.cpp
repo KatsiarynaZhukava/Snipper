@@ -58,7 +58,8 @@ void SaveFile(HWND hWnd, HBITMAP hBitmap, OPENFILENAME saveFileDialog);
 void GetBitmapFrame();
 BOOL SaveHBITMAPToFile(HBITMAP hBitmap, LPCTSTR lpszFileName);
 void DrawRect(HWND hWnd);
-
+int CountResizeWidth(int left, int right);
+int CountResizeHeight(HWND hWnd, int top, int bottom);
 
 
 
@@ -239,9 +240,9 @@ LRESULT CALLBACK BackWndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lPar
 			}
 			break;
 		case WM_MOUSEMOVE:
-			endX = GET_X_LPARAM(lParam);
+			/*endX = GET_X_LPARAM(lParam);
 			endY = GET_Y_LPARAM(lParam);
-			DrawRect(hWnd);
+			DrawRect(hWnd);*/
 			break;
 		case WM_DESTROY:
 		{
@@ -290,14 +291,15 @@ void GetBitmapFrame()
 
 HBITMAP TakeScreenShot(HWND hWnd, RECT rect)
 {
+	RECT windowRect;
 	Sleep(TIMEOUT_WINDOW_DISAPPEAR);
 	HBITMAP hBitmap = CaptureScreen(hWnd, rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top);
-	GetWindowRect(hWnd, &rect);
+	GetWindowRect(hWnd, &windowRect);
 
 	if (hBitmap != NULL) 
 	{
 		ShowWindow(hMainWnd, SW_SHOW);
-		MoveWindow(hWnd, rect.left, rect.top, DEFAULT_WINDOW_EXTENDED_WIDTH, DEFAULT_WINDOW_EXTENDED_HEIGHT, true);
+		MoveWindow(hWnd, 0, 0, CountResizeWidth(rect.left, rect.right), CountResizeHeight(hWnd, rect.top, rect.bottom), true);
 		DrawScreen(hWnd, hBitmap);
 	}
 	else
@@ -351,7 +353,6 @@ void DrawScreen(HWND hWnd, HBITMAP hBitmap)
 	HDC hdc, hdcMem;
 	BITMAP bm;
 	RECT windowRect;
-	int startScreenPointX = 0, startScreenPointY = 0;
 
 	hdc = GetDC(hWnd);
 	GetClientRect(hWnd, &windowRect);
@@ -360,23 +361,41 @@ void DrawScreen(HWND hWnd, HBITMAP hBitmap)
 	GetObject(hBitmap, sizeof(bm), &bm);
 	SelectObject(hdcMem, hBitmap);
 
-	if (windowRect.right - windowRect.left >= bm.bmWidth)
-	{
-		startScreenPointX = (((windowRect.right - windowRect.left) - bm.bmWidth) / 2);
-	}
-	if (windowRect.bottom - windowRect.top >= bm.bmHeight)
-	{
-		startScreenPointY = (((windowRect.bottom - windowRect.top) - bm.bmHeight) / 2);
-	}
-
-
-	BitBlt(hdc, startScreenPointX, startScreenPointY, bm.bmWidth, bm.bmHeight, hdcMem, 0, 0, SRCCOPY);
+	BitBlt(hdc, SCREENSHOT_DISPLAY_BORDER, SCREENSHOT_DISPLAY_BORDER, bm.bmWidth, bm.bmHeight, hdcMem, 0, 0, SRCCOPY);
 
 	ReleaseDC(hWnd, hdc);
 
 	DeleteDC(hdcMem);
 	//DeleteObject(hBitmap);
 }
+
+int CountResizeWidth(int left, int right)
+{
+	if ((right - left + 2 * SCREENSHOT_DISPLAY_BORDER) < MAX_SCREEN_WIDTH)
+	{
+		return right - left + 2 * SCREENSHOT_DISPLAY_BORDER;
+	}
+	return MAX_SCREEN_WIDTH;
+}
+
+int CountResizeHeight(HWND hWnd, int top, int bottom)
+{
+	int taskBarHeight;
+	RECT windowRect;
+
+	GetWindowRect(hWnd, &windowRect);
+	taskBarHeight = windowRect.bottom - windowRect.top;
+	GetClientRect(hWnd, &windowRect);
+	taskBarHeight -= windowRect.bottom - windowRect.top;
+
+	if ((bottom - top + 2 * SCREENSHOT_DISPLAY_BORDER) < MAX_SCREEN_HEIGHT)
+	{
+		return bottom - top + 2 * SCREENSHOT_DISPLAY_BORDER + taskBarHeight;
+	}
+	return MAX_SCREEN_HEIGHT;
+}
+
+////////////////////////////////////////////// BackGroundWindow effects /////////////////////////////////
 
 void DrawRect(HWND hWnd)
 {
