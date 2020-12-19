@@ -12,6 +12,7 @@
 #include <string>
 #include <atlstr.h>
 #include <atlimage.h>
+//#include<TCHAR.H>
 
 
 HINSTANCE   hInstance;                 
@@ -46,22 +47,35 @@ OPENFILENAME saveFileDialog;
 int startX = 0, startY = 0, endX = 0, endY = 0;
 enum screenMode screenMode;
 CHOOSECOLOR chooseColor;
-HPEN pen = CreatePen(PS_SOLID, 3, RGB(255, 0, 0));
+SCROLLINFO scrollInfo;
+HPEN pen;
+HWND hVerticalScroll, hHorizontalScroll;
+COLORREF custColors[16];
+int horizontalShowBorder = 0,
+	verticalShowBorder = 0;
+int bitmapWidth = 0,
+	bitmapHeight = 0;
 
 
 // My defined functions
-void initializeSaveFileDialog(HWND hWnd, OPENFILENAME &saveFileDialog);
-void initializeChooseColor(HWND hWnd);
+void InitializeSaveFileDialog(HWND hWnd, OPENFILENAME &saveFileDialog);
+void InitializeChooseColor(HWND hWnd);
+void InitializeScrollBars(HWND hWnd);
 HBITMAP TakeScreenShot(HWND hWnd, RECT rect);
 HBITMAP CaptureScreen(HWND hWnd, int x, int y, int width, int height);
 void DrawScreen(HWND hWnd, HBITMAP hBitmap);
 void SaveFile(HWND hWnd, HBITMAP hBitmap, OPENFILENAME saveFileDialog);
+void UpdateScrollInfo(HWND hWnd);
 void GetBitmapFrame();
-void DrawRect(HWND hWnd);
+void DrawRectangleArea(HWND hWnd);
 int CountResizeWidth(int left, int right);
 int CountResizeHeight(HWND hWnd, int top, int bottom);
 void ClearWindow(HWND hwnd);
 void DrawLine(HWND hWnd, int startX, int startY, int endX, int endY);
+void SetBitmapWidthHeight(RECT rect);
+int CorrectXDrawingCoordinate(int x);
+int CorrectYDrawingCoordinate(int y);
+void ResetBitmapWidthHeight();
 
 
 
@@ -100,9 +114,6 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
     return (int) msg.wParam;
 }
 
-
-
-
 LRESULT CALLBACK MainWndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
 	static int timeout;
@@ -111,17 +122,20 @@ LRESULT CALLBACK MainWndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lPar
 	static POINT previousPoint;
 	static HDC hdc;
 	static bool lButtonPressed;
+
     switch (message)
     {
 		case WM_CREATE:
 			isLineDrawing = false;
 			lButtonPressed = true;
-			initializeChooseColor(hWnd);
-			initializeSaveFileDialog(hWnd, saveFileDialog);
+			//InitializeScrollBars(hWnd);
+			InitializeChooseColor(hWnd);
+			InitializeSaveFileDialog(hWnd, saveFileDialog);
 			break;
 		case WM_MOVE:
 			if (hBitmap)
 			{
+				UpdateScrollInfo(hWnd);
 				DrawScreen(hWnd, hBitmap);
 			}
 			break;
@@ -147,7 +161,7 @@ LRESULT CALLBACK MainWndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lPar
 					}
 
 					SystemParametersInfo(SPI_GETWORKAREA, 0, &rect, 0);
-					ShowWindow(hMainWnd, SW_HIDE);
+					ShowWindow(hMainWnd, SW_HIDE);					
 					hBitmap = TakeScreenShot(hMainWnd, rect);
 					break;
 				case ID_SCREENAREA_WINDOW:
@@ -203,10 +217,20 @@ LRESULT CALLBACK MainWndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lPar
 				case ID_PEN_COLOR:		
 					isLineDrawing = true;
 					lButtonPressed = false;
-					/*if (ChooseColor(&chooseColor) == TRUE) {
-						DeleteObject(pen);
+
+					if (ChooseColor(&chooseColor) == TRUE) {					
+						hdc = GetDC(NULL);
 						pen = CreatePen(PS_SOLID, 3, chooseColor.rgbResult);
-					}*/
+						SelectObject(hdc, pen);
+						//SetDCPenColor(hdc, chooseColor.rgbResult);
+						ReleaseDC(NULL, hdc);
+
+						hdc = GetDC(hWnd);
+						HGDIOBJ old = SelectObject(hdc, pen);
+
+						SelectObject(hdc, old);
+						ReleaseDC(hWnd, hdc);
+					}
 					break;
 				default:
 					return DefWindowProc(hWnd, message, wParam, lParam);
@@ -219,8 +243,8 @@ LRESULT CALLBACK MainWndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lPar
 		case WM_LBUTTONDOWN:
 			if (isLineDrawing)
 			{
-				previousPoint.x = LOWORD(lParam);
-				previousPoint.y = HIWORD(lParam);
+				previousPoint.x = CorrectXDrawingCoordinate(LOWORD(lParam));
+				previousPoint.y = CorrectYDrawingCoordinate(HIWORD(lParam));
 				lButtonPressed = true;
 			}
 			break;
@@ -229,7 +253,7 @@ LRESULT CALLBACK MainWndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lPar
 			{
 				hdc = GetDC(hWnd);
 				MoveToEx(hdc, previousPoint.x, previousPoint.y, NULL);
-				LineTo(hdc, LOWORD(lParam), HIWORD(lParam));
+				LineTo(hdc, CorrectXDrawingCoordinate(LOWORD(lParam)), CorrectYDrawingCoordinate(HIWORD(lParam)));
 				ReleaseDC(hWnd, hdc);
 				lButtonPressed = false;
 			}
@@ -239,7 +263,7 @@ LRESULT CALLBACK MainWndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lPar
 			{
 				hdc = GetDC(hWnd);
 				MoveToEx(hdc, previousPoint.x, previousPoint.y, NULL);
-				LineTo(hdc, previousPoint.x = LOWORD(lParam),previousPoint.y = HIWORD(lParam));
+				LineTo(hdc, previousPoint.x = CorrectXDrawingCoordinate(LOWORD(lParam)), previousPoint.y = CorrectYDrawingCoordinate(HIWORD(lParam)));
 				ReleaseDC(hWnd, hdc);
 			}
 			break;
@@ -281,7 +305,8 @@ LRESULT CALLBACK BackWndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lPar
 
 				ShowWindow(hBackWnd, SW_HIDE);
 				hScreenWnd = WindowFromPoint(mousePosition);
-				DwmGetWindowAttribute(hScreenWnd, DWMWA_EXTENDED_FRAME_BOUNDS, &rect, sizeof(RECT));				
+				DwmGetWindowAttribute(hScreenWnd, DWMWA_EXTENDED_FRAME_BOUNDS, &rect, sizeof(RECT));	
+				SetBitmapWidthHeight(rect);
 				hBitmap = TakeScreenShot(hMainWnd, rect);
 				break;
 			case RECTANGLE:
@@ -290,6 +315,7 @@ LRESULT CALLBACK BackWndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lPar
 
 				ShowWindow(hBackWnd, SW_HIDE);
 				GetBitmapFrame();
+				SetBitmapWidthHeight(rect);
 				hBitmap = TakeScreenShot(hMainWnd, rect);
 				break;
 			}
@@ -300,7 +326,7 @@ LRESULT CALLBACK BackWndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lPar
 			{
 				endX = GET_X_LPARAM(lParam);
 				endY = GET_Y_LPARAM(lParam);
-				DrawRect(hWnd);
+				DrawRectangleArea(hWnd);
 			}
 			break;
 		case WM_DESTROY:
@@ -423,7 +449,7 @@ void DrawScreen(HWND hWnd, HBITMAP hBitmap)
 	SelectObject(hdcMemory, hbmMem);
 
 	BitBlt(hdcMemory, 0, 0, bm.bmWidth, bm.bmHeight, hdcWithBitmap, 0, 0, SRCCOPY);			// Сначала переводим в память
-	BitBlt(hdcMain, SCREENSHOT_DISPLAY_BORDER, SCREENSHOT_DISPLAY_BORDER, bm.bmWidth, bm.bmHeight, hdcMemory, 0, 0, SRCCOPY); // Оттуда на экран
+	BitBlt(hdcMain, horizontalShowBorder, verticalShowBorder, bm.bmWidth, bm.bmHeight, hdcMemory, 0, 0, SRCCOPY); // Оттуда на экран
 
 	ReleaseDC(hWnd, hdcMain);
 
@@ -433,14 +459,32 @@ void DrawScreen(HWND hWnd, HBITMAP hBitmap)
 	//DeleteObject(hBitmap);
 }
 
+void SetBitmapWidthHeight(RECT rect)
+{
+	bitmapWidth = rect.right - rect.left;
+	bitmapHeight = rect.bottom - rect.top;
+}
+
+void ResetBitmapWidthHeight()
+{
+	bitmapWidth = 0;
+	bitmapHeight = 0;
+}
 
 int CountResizeWidth(int left, int right)
 {
-	if ((right - left + 2 * SCREENSHOT_DISPLAY_BORDER) < MAX_SCREEN_WIDTH)
+	if (right - left < MIN_WINDOW_WIDTH)
 	{
-		return right - left + 2 * SCREENSHOT_DISPLAY_BORDER;
+		horizontalShowBorder = (MIN_WINDOW_WIDTH - (right - left)) / 2;
+		return MIN_WINDOW_WIDTH;
 	}
-	return MAX_SCREEN_WIDTH;
+	else if (right - left < MAX_WINDOW_WIDTH)
+	{
+		horizontalShowBorder = 0;
+		return right - left;
+	}
+	horizontalShowBorder = 0;
+	return MAX_WINDOW_WIDTH;
 }
 
 int CountResizeHeight(HWND hWnd, int top, int bottom)
@@ -453,11 +497,18 @@ int CountResizeHeight(HWND hWnd, int top, int bottom)
 	GetClientRect(hWnd, &windowRect);
 	taskBarHeight -= windowRect.bottom - windowRect.top;
 
-	if ((bottom - top + 2 * SCREENSHOT_DISPLAY_BORDER) < MAX_SCREEN_HEIGHT)
+	if (bottom - top < (MIN_WINDOW_HEIGHT - taskBarHeight))
 	{
-		return bottom - top + 2 * SCREENSHOT_DISPLAY_BORDER + taskBarHeight;
+		verticalShowBorder = (MIN_WINDOW_HEIGHT - taskBarHeight - (bottom - top)) / 2;
+		return MIN_WINDOW_HEIGHT;
 	}
-	return MAX_SCREEN_HEIGHT;
+	else if (bottom - top < MAX_WINDOW_HEIGHT)
+	{
+		verticalShowBorder = 0;
+		return bottom - top + taskBarHeight;
+	}
+	verticalShowBorder = 0;
+	return MAX_WINDOW_HEIGHT;
 }
 
 
@@ -466,6 +517,45 @@ void ClearWindow(HWND hWnd)
 	RECT windowRect;
 	GetWindowRect(hWnd, &windowRect);
 	MoveWindow(hWnd, windowRect.left, windowRect.top, DEFAULT_WINDOW_WIDTH, DEFAULT_WINDOW_HEIGHT, true);
+	ResetBitmapWidthHeight();
+}
+
+int CorrectXDrawingCoordinate(int x)
+{
+	if (bitmapWidth > 0) {
+		if (x < horizontalShowBorder)
+		{
+			x = horizontalShowBorder;
+		}
+		else if (x > bitmapWidth + horizontalShowBorder)
+		{
+			x = bitmapWidth + horizontalShowBorder - 1;
+		}
+		return x;
+	}
+	else
+	{
+		return -1;
+	}
+}
+
+int CorrectYDrawingCoordinate(int y)
+{
+	if (bitmapHeight > 0) {
+		if (y < verticalShowBorder)
+		{
+			y = verticalShowBorder;
+		}
+		else if (y > bitmapHeight + verticalShowBorder)
+		{
+			y = bitmapHeight + verticalShowBorder - 1;
+		}
+		return y;
+	}
+	else
+	{
+		return -1;
+	}
 }
 
 
@@ -504,7 +594,7 @@ void DrawLine(HWND hWnd, int startX, int startY, int endX, int endY)
 
 ////////////////////////////////////////////// BackGroundWindow effects ////////////////////////////
 
-void DrawRect(HWND hWnd)
+void DrawRectangleArea(HWND hWnd)
 {
 	HDC hdc;
 	HBITMAP hbmMem, hbmOld;
@@ -519,15 +609,58 @@ void DrawRect(HWND hWnd)
 	Rectangle(hdc, startX, startY, endX, endY);
 	ReleaseDC(hWnd, hdc);
 }
+///////////////////////////////////////////////////////////////
 
+void InitializeScrollBars(HWND hWnd)
+{
+	RECT windowRect;
+	GetClientRect(hWnd, &windowRect);
+	hVerticalScroll = CreateWindow((LPCWSTR)"scrollbar", NULL,
+		WS_CHILD | WS_VISIBLE | SBS_VERT, windowRect.right - SCROLLBAR_WIDTH, 0, SCROLLBAR_WIDTH, windowRect.bottom,
+		hWnd, (HMENU)-1, hInstance, NULL);
+
+
+	hHorizontalScroll = CreateWindow((LPCWSTR)"scrollbar", NULL,
+		WS_CHILD | WS_VISIBLE | SBS_HORZ, 0, windowRect.bottom - SCROLLBAR_WIDTH, windowRect.right - SCROLLBAR_WIDTH, SCROLLBAR_WIDTH,
+		hWnd, (HMENU)-1, hInstance, NULL);
+
+	SetScrollRange(hVerticalScroll, SB_CTL, 0, windowRect.bottom, TRUE);
+	SetScrollRange(hHorizontalScroll, SB_CTL, 0, windowRect.right, TRUE);
+
+	//Cледующая функция устанавливает ползунок в нужное положение
+	//nxPos - новое положение ползунка. TRUE - необходимость перерисовки
+	SetScrollPos(hVerticalScroll, SB_CTL, 0, TRUE);
+	SetScrollPos(hHorizontalScroll, SB_CTL, 0, TRUE);
+}
+
+
+
+void UpdateScrollInfo(HWND hWnd)
+{
+	RECT windowRect;
+	BITMAPINFO bitmapInfo;
+
+	GetClientRect(hWnd, &windowRect);
+	scrollInfo.cbSize = sizeof(SCROLLINFO);
+	scrollInfo.nPos = 0;
+	scrollInfo.nPage = windowRect.bottom;
+	scrollInfo.nMin = 0;
+	/*if (hBitmap)
+	{
+		GetObject(hBitmap, sizeof(BITMAP), &bitmapInfo);
+	}*/
+	scrollInfo.nMax = 400;
+
+	scrollInfo.fMask = SIF_PAGE | SIF_RANGE | SIF_POS;
+	SetScrollInfo(hWnd, SB_VERT, &scrollInfo, TRUE);
+}
 
 
 
 /////////////////////////////////////////////////////////////
 
-void initializeChooseColor(HWND hWnd)
+void InitializeChooseColor(HWND hWnd)
 {
-	COLORREF    custColors[16];
 	ZeroMemory(&chooseColor, sizeof(CHOOSECOLOR));
 
 	chooseColor.lStructSize = sizeof(CHOOSECOLOR);
@@ -542,7 +675,7 @@ void initializeChooseColor(HWND hWnd)
 ///////////////////////////////////////////////////////////// Save file ///////////////////////////////////////////////////////////
 
 
-void initializeSaveFileDialog(HWND hWnd, OPENFILENAME &saveFileDialog)
+void InitializeSaveFileDialog(HWND hWnd, OPENFILENAME &saveFileDialog)
 {
 	char szSaveFileName[MAX_PATH];
 
@@ -559,36 +692,15 @@ void initializeSaveFileDialog(HWND hWnd, OPENFILENAME &saveFileDialog)
 void SaveFile(HWND hWnd, HBITMAP hBitmap, OPENFILENAME saveFileDialog)
 {
 	CImage image;
+	char filename[MAX_PATH] = { 0 };
 
 	if (GetSaveFileName(&saveFileDialog)) {
 
-		LPCWSTR extension = PathFindExtensionW(saveFileDialog.lpstrFile);
-		PathStripPath(saveFileDialog.lpstrFile);
-		const wchar_t* str = (const wchar_t*)saveFileDialog.lpstrFile;
-		if (lstrcmpW(extension, (LPCWSTR)L".jpg") == 0)
-		{
-			image.Attach(hBitmap);
-			image.Save((LPCTSTR)L"someImg.jpg", Gdiplus::ImageFormatJPEG);
-			image.Detach();
-		}
-		else if (lstrcmpW(extension, (LPCWSTR)L".gif") == 0)
-		{
-			image.Attach(hBitmap);
-			image.Save(saveFileDialog.lpstrFile, Gdiplus::ImageFormatGIF);
-			image.Detach();
-		}
-		else if (lstrcmpW(extension, (LPCWSTR)L".png") == 0)
-		{
-			image.Attach(hBitmap);
-			image.Save((LPCTSTR)str, Gdiplus::ImageFormatPNG);
-			image.Detach();
-		}
-		else if (lstrcmpW(extension, (LPCWSTR)L".bmp") == 0)
-		{
-			image.Attach(hBitmap);
-			image.Save((LPCTSTR)str, Gdiplus::ImageFormatBMP);
-			image.Detach();
-		}
+		TCHAR path[MAX_PATH];
+		_tcscpy_s(path, saveFileDialog.lpstrFile);
+		image.Attach(hBitmap);
+		HRESULT Save = image.Save(path);
+		image.Detach();
 	}
 	DeleteObject(image);
 }
