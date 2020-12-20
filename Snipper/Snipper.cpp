@@ -47,14 +47,15 @@ OPENFILENAME saveFileDialog;
 int startX = 0, startY = 0, endX = 0, endY = 0;
 enum screenMode screenMode;
 CHOOSECOLOR chooseColor;
-SCROLLINFO scrollInfo;
-HPEN pen;
+HPEN hPen = CreatePen(PS_SOLID, 5, RGB(69, 69, 69));
 HWND hVerticalScroll, hHorizontalScroll;
 COLORREF custColors[16];
 int horizontalShowBorder = 0,
 	verticalShowBorder = 0;
 int bitmapWidth = 0,
 	bitmapHeight = 0;
+SCROLLINFO horizontalScrollInfo,
+		   verticalScrollInfo;
 
 
 // My defined functions
@@ -65,7 +66,6 @@ HBITMAP TakeScreenShot(HWND hWnd, RECT rect);
 HBITMAP CaptureScreen(HWND hWnd, int x, int y, int width, int height);
 void DrawScreen(HWND hWnd, HBITMAP hBitmap);
 void SaveFile(HWND hWnd, HBITMAP hBitmap, OPENFILENAME saveFileDialog);
-void UpdateScrollInfo(HWND hWnd);
 void GetBitmapFrame();
 void DrawRectangleArea(HWND hWnd);
 int CountResizeWidth(int left, int right);
@@ -76,6 +76,11 @@ void SetBitmapWidthHeight(RECT rect);
 int CorrectXDrawingCoordinate(int x);
 int CorrectYDrawingCoordinate(int y);
 void ResetBitmapWidthHeight();
+void CorrectWindowCaptureRect(RECT *rect);
+void DrawLine(HWND hWnd, int startX, int startY, int endX, int endY);
+void UpdateVerticalScrollInfo(HWND hWnd);
+void UpdateHorizontalScrollInfo(HWND hWnd);
+
 
 
 
@@ -119,9 +124,17 @@ LRESULT CALLBACK MainWndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lPar
 	static int timeout;
 	static RECT currentWindowRect;
 	static bool isLineDrawing;
-	static POINT previousPoint;
-	static HDC hdc;
 	static bool lButtonPressed;
+	static POINT previousPoint;
+	static BITMAP bitmap;
+	static HDC hdc, hdcMem;
+	static HGDIOBJ oldBitmap;
+	static HPEN oldPen;
+	static int currentHorizontalPos, 
+			   currentVerticalPos, 
+			   wheelDelta, 
+			   horizontalStep = 0, 
+			   verticalStep = 0;
 
     switch (message)
     {
@@ -134,18 +147,126 @@ LRESULT CALLBACK MainWndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lPar
 			break;
 		case WM_MOVE:
 			if (hBitmap)
-			{
-				UpdateScrollInfo(hWnd);
+			{				
 				DrawScreen(hWnd, hBitmap);
 			}
 			break;
-		case WM_HOTKEY:
-			switch (wParam)
-			{
-				case COPY_TO_CLIPBOARD_ID:
-
-					break;
+		/*case WM_MOUSEWHEEL:
+			wheelDelta = GET_WHEEL_DELTA_WPARAM(wParam);
+			if (wheelDelta > 0)
+				SendMessage(hWnd, WM_VSCROLL, SB_LINEUP, NULL);
+			if (wheelDelta < 0)
+				SendMessage(hWnd, WM_VSCROLL, SB_LINEDOWN, NULL);
+			break;
+		case WM_KEYDOWN:
+			switch (wParam) {
+			case VK_LEFT:
+				SendMessage(hWnd, WM_VSCROLL, SB_PAGEDOWN, NULL);
+				break;
+			case VK_RIGHT:
+				SendMessage(hWnd, WM_VSCROLL, SB_PAGEUP, NULL);
+				break;
+			case VK_UP:
+				SendMessage(hWnd, WM_VSCROLL, SB_LINEUP, NULL);
+				break;
+			case VK_DOWN:
+				SendMessage(hWnd, WM_VSCROLL, SB_LINEDOWN, NULL);
+				break;
 			}
+			break;*/
+		case WM_VSCROLL:
+
+			verticalScrollInfo.cbSize = sizeof(SCROLLINFO);
+
+			verticalScrollInfo.fMask = SIF_ALL;
+			GetScrollInfo(hWnd, SB_VERT, &verticalScrollInfo);
+
+			currentVerticalPos = verticalScrollInfo.nPos;
+
+			switch (LOWORD(wParam)) {
+			case SB_LINEUP:
+				verticalScrollInfo.nPos -= SCROLL_STEP;
+				verticalStep = SCROLL_STEP;
+				break;
+			case SB_LINEDOWN:
+				verticalScrollInfo.nPos += SCROLL_STEP;
+				verticalStep = -SCROLL_STEP;
+				break;
+			case SB_PAGEUP:
+				verticalScrollInfo.nPos -= verticalScrollInfo.nPage;
+				verticalStep = verticalScrollInfo.nPage;
+				break;
+			case SB_PAGEDOWN:
+				verticalScrollInfo.nPos += verticalScrollInfo.nPage;
+				verticalStep = -(int)verticalScrollInfo.nPage;
+				break;
+			case SB_THUMBTRACK:
+				verticalScrollInfo.nPos = verticalScrollInfo.nTrackPos;
+				verticalStep = currentVerticalPos - verticalScrollInfo.nPos;
+				break;
+			default: return 0;
+			}
+
+			verticalScrollInfo.fMask = SIF_POS;
+			SetScrollInfo(hWnd, SB_VERT, &verticalScrollInfo, TRUE);
+
+			//if (((verticalStep > 0) && (bitmapHeight - verticalStep < 0)) || ((step < 0) && (bitmapHeight - clAreaHeight > 0)))
+			{
+				ScrollWindow(hWnd, 0, verticalStep, NULL, NULL);
+				UpdateWindow(hWnd);
+			}
+			//else
+			{
+				//tableTop -= verticalStep;
+			}
+
+			break;
+		case WM_HSCROLL:
+
+			horizontalScrollInfo.cbSize = sizeof(SCROLLINFO);
+
+			horizontalScrollInfo.fMask = SIF_ALL;
+			GetScrollInfo(hWnd, SB_HORZ, &horizontalScrollInfo);
+
+			currentHorizontalPos = horizontalScrollInfo.nPos;
+
+			switch (LOWORD(wParam)) {
+			case SB_LINELEFT:
+				horizontalScrollInfo.nPos -= SCROLL_STEP;
+				horizontalStep = SCROLL_STEP;
+				break;
+			case SB_LINERIGHT:
+				horizontalScrollInfo.nPos += SCROLL_STEP;
+				horizontalStep = -SCROLL_STEP;
+				break;
+			case SB_PAGELEFT:
+				horizontalScrollInfo.nPos -= horizontalScrollInfo.nPage;
+				horizontalStep = horizontalScrollInfo.nPage;
+				break;
+			case SB_PAGERIGHT:
+				horizontalScrollInfo.nPos += horizontalScrollInfo.nPage;
+				horizontalStep = -(int)horizontalScrollInfo.nPage;
+				break;
+			case SB_THUMBTRACK:
+				horizontalScrollInfo.nPos = horizontalScrollInfo.nTrackPos;
+				horizontalStep = currentHorizontalPos - horizontalScrollInfo.nPos;
+				break;
+			default: return 0;
+			}
+
+			horizontalScrollInfo.fMask = SIF_POS;
+			SetScrollInfo(hWnd, SB_VERT, &horizontalScrollInfo, TRUE);
+
+			//if (((horizontalStep > 0) && (bitmapHeight - horizontalStep < 0)) || ((horizontalStep < 0) && (tableHeight - clAreaHeight > 0)))
+			//{
+				ScrollWindow(hWnd, horizontalStep, 0, NULL, NULL);
+				UpdateWindow(hWnd);
+			//}
+			//else
+			//{
+			//	tableTop -= step;
+			//}
+
 			break;
 		case WM_COMMAND:
 			{
@@ -163,6 +284,13 @@ LRESULT CALLBACK MainWndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lPar
 					SystemParametersInfo(SPI_GETWORKAREA, 0, &rect, 0);
 					ShowWindow(hMainWnd, SW_HIDE);					
 					hBitmap = TakeScreenShot(hMainWnd, rect);
+
+					UpdateVerticalScrollInfo(hWnd);
+					UpdateHorizontalScrollInfo(hWnd);
+
+					InvalidateRect(hWnd, NULL, FALSE);
+					UpdateWindow(hWnd);
+
 					break;
 				case ID_SCREENAREA_WINDOW:
 					if (timeout)
@@ -174,6 +302,13 @@ LRESULT CALLBACK MainWndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lPar
 
 					ShowWindow(hMainWnd, SW_HIDE);
 					ShowWindow(hBackWnd, SW_SHOW);
+
+					InvalidateRect(hWnd, NULL, FALSE);
+					UpdateWindow(hWnd);
+
+					UpdateVerticalScrollInfo(hWnd);
+					UpdateHorizontalScrollInfo(hWnd);
+
 					SetLayeredWindowAttributes(hBackWnd, RGB(0, 0, 0), BACKWND_TRANSPARENCY, LWA_ALPHA);
 					break;
 				case IDM_RECTANGLE:
@@ -186,6 +321,13 @@ LRESULT CALLBACK MainWndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lPar
 
 					ShowWindow(hMainWnd, SW_HIDE);
 					ShowWindow(hBackWnd, SW_SHOW);
+
+					InvalidateRect(hWnd, NULL, FALSE);
+					UpdateWindow(hWnd);
+
+					UpdateVerticalScrollInfo(hWnd);
+					UpdateHorizontalScrollInfo(hWnd);
+
 					SetLayeredWindowAttributes(hBackWnd, RGB(0, 0, 0), BACKWND_TRANSPARENCY, LWA_ALPHA);
 					break;
 				case ID_SCREENAREA_ARBITRARYAREA:
@@ -219,17 +361,8 @@ LRESULT CALLBACK MainWndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lPar
 					lButtonPressed = false;
 
 					if (ChooseColor(&chooseColor) == TRUE) {					
-						hdc = GetDC(NULL);
-						pen = CreatePen(PS_SOLID, 3, chooseColor.rgbResult);
-						SelectObject(hdc, pen);
-						//SetDCPenColor(hdc, chooseColor.rgbResult);
-						ReleaseDC(NULL, hdc);
-
-						hdc = GetDC(hWnd);
-						HGDIOBJ old = SelectObject(hdc, pen);
-
-						SelectObject(hdc, old);
-						ReleaseDC(hWnd, hdc);
+						DeleteObject(hPen);
+						hPen = CreatePen(PS_SOLID, 3, chooseColor.rgbResult);
 					}
 					break;
 				default:
@@ -245,16 +378,35 @@ LRESULT CALLBACK MainWndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lPar
 			{
 				previousPoint.x = CorrectXDrawingCoordinate(LOWORD(lParam));
 				previousPoint.y = CorrectYDrawingCoordinate(HIWORD(lParam));
+
+				oldPen = (HPEN)SelectObject(hdc, hPen);
 				lButtonPressed = true;
 			}
 			break;
 		case WM_LBUTTONUP:
 			if (isLineDrawing)
 			{
+
 				hdc = GetDC(hWnd);
-				MoveToEx(hdc, previousPoint.x, previousPoint.y, NULL);
-				LineTo(hdc, CorrectXDrawingCoordinate(LOWORD(lParam)), CorrectYDrawingCoordinate(HIWORD(lParam)));
+				hdcMem = CreateCompatibleDC(hdc);
+				oldBitmap = SelectObject(hdcMem, hBitmap);
+
+				GetObject(hBitmap, sizeof(bitmap), &bitmap);
+
+				oldPen = (HPEN)SelectObject(hdcMem, hPen);
+
+				MoveToEx(hdcMem, previousPoint.x, previousPoint.y, NULL);
+				LineTo(hdcMem, previousPoint.x = CorrectXDrawingCoordinate(LOWORD(lParam)), previousPoint.y = CorrectYDrawingCoordinate(HIWORD(lParam)));
+
+				SelectObject(hdcMem, oldPen);
+
+				BitBlt(hdc, horizontalShowBorder, verticalShowBorder, bitmap.bmWidth, bitmap.bmHeight, hdcMem, 0, 0, SRCCOPY);
+
 				ReleaseDC(hWnd, hdc);
+
+				SelectObject(hdcMem, oldBitmap);
+				DeleteDC(hdcMem);
+
 				lButtonPressed = false;
 			}
 			break;
@@ -262,9 +414,24 @@ LRESULT CALLBACK MainWndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lPar
 			if (isLineDrawing && lButtonPressed)
 			{
 				hdc = GetDC(hWnd);
-				MoveToEx(hdc, previousPoint.x, previousPoint.y, NULL);
-				LineTo(hdc, previousPoint.x = CorrectXDrawingCoordinate(LOWORD(lParam)), previousPoint.y = CorrectYDrawingCoordinate(HIWORD(lParam)));
+				hdcMem = CreateCompatibleDC(hdc);
+				oldBitmap = SelectObject(hdcMem, hBitmap);
+
+				GetObject(hBitmap, sizeof(bitmap), &bitmap);
+
+				oldPen = (HPEN)SelectObject(hdcMem, hPen);
+
+				MoveToEx(hdcMem, previousPoint.x, previousPoint.y, NULL);
+				LineTo(hdcMem, previousPoint.x = CorrectXDrawingCoordinate(LOWORD(lParam)), previousPoint.y = CorrectYDrawingCoordinate(HIWORD(lParam)));
+
+				SelectObject(hdcMem, oldPen);
+
+				BitBlt(hdc, horizontalShowBorder, verticalShowBorder, bitmap.bmWidth, bitmap.bmHeight, hdcMem, 0, 0, SRCCOPY);
+
 				ReleaseDC(hWnd, hdc);
+
+				SelectObject(hdcMem, oldBitmap);
+				DeleteDC(hdcMem);
 			}
 			break;
 		case WM_PAINT:
@@ -306,6 +473,8 @@ LRESULT CALLBACK BackWndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lPar
 				ShowWindow(hBackWnd, SW_HIDE);
 				hScreenWnd = WindowFromPoint(mousePosition);
 				DwmGetWindowAttribute(hScreenWnd, DWMWA_EXTENDED_FRAME_BOUNDS, &rect, sizeof(RECT));	
+
+				CorrectWindowCaptureRect(&rect);
 				SetBitmapWidthHeight(rect);
 				hBitmap = TakeScreenShot(hMainWnd, rect);
 				break;
@@ -341,6 +510,26 @@ LRESULT CALLBACK BackWndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lPar
 }
 
 
+
+
+void CorrectWindowCaptureRect(RECT *rect)
+{
+	RECT windowRect;
+	SystemParametersInfo(SPI_GETWORKAREA, 0, &windowRect, 0);
+
+	if (rect->left < 0)
+	{
+		rect->left = 0;
+	}
+	if (rect->top < 0)
+	{
+		rect->top = 0;
+	}
+	if (rect->right > windowRect.right)
+	{
+		rect->right = windowRect.right;
+	}
+}
 
 void GetBitmapFrame()
 {
@@ -520,16 +709,46 @@ void ClearWindow(HWND hWnd)
 	ResetBitmapWidthHeight();
 }
 
+
+void DrawLine(HWND hWnd, int startX, int startY, int endX, int endY)
+{
+	BITMAP bitmap;
+	HDC hdc, hdcMem;
+	HGDIOBJ oldBitmap;
+	HPEN oldPen;
+
+	hdc = GetDC(hWnd);
+	hdcMem = CreateCompatibleDC(hdc);
+	oldBitmap = SelectObject(hdcMem, hBitmap);
+
+	GetObject(hBitmap, sizeof(bitmap), &bitmap);
+
+	oldPen = (HPEN)SelectObject(hdcMem, hPen);
+
+	MoveToEx(hdcMem, startX, startY, NULL);
+	LineTo(hdcMem, endX, endY);
+
+	SelectObject(hdcMem, oldPen);
+
+	BitBlt(hdc, horizontalShowBorder, verticalShowBorder, bitmap.bmWidth, bitmap.bmHeight, hdcMem, 0, 0, SRCCOPY);
+
+	ReleaseDC(hWnd, hdc);
+
+	SelectObject(hdcMem, oldBitmap);
+	DeleteDC(hdcMem);
+}
+
+
 int CorrectXDrawingCoordinate(int x)
 {
 	if (bitmapWidth > 0) {
 		if (x < horizontalShowBorder)
 		{
-			x = horizontalShowBorder;
+			x = 0;
 		}
 		else if (x > bitmapWidth + horizontalShowBorder)
 		{
-			x = bitmapWidth + horizontalShowBorder - 1;
+			x = bitmapWidth;
 		}
 		return x;
 	}
@@ -544,11 +763,11 @@ int CorrectYDrawingCoordinate(int y)
 	if (bitmapHeight > 0) {
 		if (y < verticalShowBorder)
 		{
-			y = verticalShowBorder;
+			y = 0;
 		}
 		else if (y > bitmapHeight + verticalShowBorder)
 		{
-			y = bitmapHeight + verticalShowBorder - 1;
+			y = bitmapHeight;
 		}
 		return y;
 	}
@@ -558,38 +777,6 @@ int CorrectYDrawingCoordinate(int y)
 	}
 }
 
-
-void DrawLine(HWND hWnd, int startX, int startY, int endX, int endY)
-{
-	HDC hdcMain, hdcWithBitmap;
-	BITMAP bm;
-
-	hdcMain = GetDC(hWnd);
-
-	hdcWithBitmap = CreateCompatibleDC(hdcMain);
-	GetObject(hBitmap, sizeof(bm), &bm);
-	SelectObject(hdcWithBitmap, hBitmap);                // Создали hdc с битмапом
-
-	MoveToEx(hdcWithBitmap, startX, startY, NULL);
-	LineTo(hdcWithBitmap, endX, endX);
-
-	BitBlt(hdcMain, 0, 0, bm.bmWidth, bm.bmHeight, hdcWithBitmap, 0, 0, SRCCOPY);			// Сначала переводим в память
-
-	/*hdcMemory = CreateCompatibleDC(hdcMain);			// Создали дополнительный hdc для двойной буферизации
-	hbmMem = CreateCompatibleBitmap(hdcMain, windowRect.right - windowRect.left, windowRect.bottom - windowRect.top);
-	SelectObject(hdcMemory, hbmMem);
-
-	BitBlt(hdcMemory, 0, 0, bm.bmWidth, bm.bmHeight, hdcWithBitmap, 0, 0, SRCCOPY);			// Сначала переводим в память
-	BitBlt(hdcMain, SCREENSHOT_DISPLAY_BORDER, SCREENSHOT_DISPLAY_BORDER, bm.bmWidth, bm.bmHeight, hdcMemory, 0, 0, SRCCOPY); // Оттуда на экран*/
-
-	ReleaseDC(hWnd, hdcMain);
-
-	/*DeleteDC(hdcMemory);
-	DeleteDC(hdcWithBitmap);
-	DeleteObject(hbmMem);*/
-
-	ReleaseDC(hWnd, hdcMain);
-}
 
 
 ////////////////////////////////////////////// BackGroundWindow effects ////////////////////////////
@@ -611,48 +798,57 @@ void DrawRectangleArea(HWND hWnd)
 }
 ///////////////////////////////////////////////////////////////
 
-void InitializeScrollBars(HWND hWnd)
+void UpdateVerticalScrollInfo(HWND hWnd)
 {
 	RECT windowRect;
+	BITMAP bitmap;
+
 	GetClientRect(hWnd, &windowRect);
-	hVerticalScroll = CreateWindow((LPCWSTR)"scrollbar", NULL,
-		WS_CHILD | WS_VISIBLE | SBS_VERT, windowRect.right - SCROLLBAR_WIDTH, 0, SCROLLBAR_WIDTH, windowRect.bottom,
-		hWnd, (HMENU)-1, hInstance, NULL);
-
-
-	hHorizontalScroll = CreateWindow((LPCWSTR)"scrollbar", NULL,
-		WS_CHILD | WS_VISIBLE | SBS_HORZ, 0, windowRect.bottom - SCROLLBAR_WIDTH, windowRect.right - SCROLLBAR_WIDTH, SCROLLBAR_WIDTH,
-		hWnd, (HMENU)-1, hInstance, NULL);
-
-	SetScrollRange(hVerticalScroll, SB_CTL, 0, windowRect.bottom, TRUE);
-	SetScrollRange(hHorizontalScroll, SB_CTL, 0, windowRect.right, TRUE);
-
-	//Cледующая функция устанавливает ползунок в нужное положение
-	//nxPos - новое положение ползунка. TRUE - необходимость перерисовки
-	SetScrollPos(hVerticalScroll, SB_CTL, 0, TRUE);
-	SetScrollPos(hHorizontalScroll, SB_CTL, 0, TRUE);
+	verticalScrollInfo.cbSize = sizeof(SCROLLINFO);
+	verticalScrollInfo.nPos = 0;
+	verticalScrollInfo.nPage = windowRect.bottom;
+	verticalScrollInfo.nMin = 0;
+	if (hBitmap)
+	{
+		GetObject(hBitmap, sizeof(BITMAP), &bitmap);
+		if (bitmap.bmHeight > MAX_WINDOW_HEIGHT)
+		{
+			verticalScrollInfo.nMax = bitmap.bmHeight;
+		}
+		else
+		{
+			verticalScrollInfo.nMax = verticalScrollInfo.nMin;
+		}
+	}
+	verticalScrollInfo.fMask = SIF_PAGE | SIF_RANGE | SIF_POS;
+	SetScrollInfo(hWnd, SB_VERT, &verticalScrollInfo, TRUE);
 }
 
-
-
-void UpdateScrollInfo(HWND hWnd)
+void UpdateHorizontalScrollInfo(HWND hWnd)
 {
 	RECT windowRect;
-	BITMAPINFO bitmapInfo;
+	BITMAP bitmap;
 
 	GetClientRect(hWnd, &windowRect);
-	scrollInfo.cbSize = sizeof(SCROLLINFO);
-	scrollInfo.nPos = 0;
-	scrollInfo.nPage = windowRect.bottom;
-	scrollInfo.nMin = 0;
-	/*if (hBitmap)
+	horizontalScrollInfo.cbSize = sizeof(SCROLLINFO);
+	horizontalScrollInfo.nPos = 0;
+	horizontalScrollInfo.nPage = windowRect.right;
+	horizontalScrollInfo.nMin = 0;
+	if (hBitmap)
 	{
-		GetObject(hBitmap, sizeof(BITMAP), &bitmapInfo);
-	}*/
-	scrollInfo.nMax = 400;
+		GetObject(hBitmap, sizeof(BITMAP), &bitmap);
+		if (bitmap.bmWidth > MAX_WINDOW_WIDTH)
+		{
+			horizontalScrollInfo.nMax = bitmap.bmWidth;
+		}
+		else
+		{
+			horizontalScrollInfo.nMax = horizontalScrollInfo.nMin;
+		}
+	}
 
-	scrollInfo.fMask = SIF_PAGE | SIF_RANGE | SIF_POS;
-	SetScrollInfo(hWnd, SB_VERT, &scrollInfo, TRUE);
+	horizontalScrollInfo.fMask = SIF_PAGE | SIF_RANGE | SIF_POS;
+	SetScrollInfo(hWnd, SB_HORZ, &horizontalScrollInfo, TRUE);
 }
 
 
